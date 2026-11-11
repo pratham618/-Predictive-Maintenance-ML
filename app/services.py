@@ -13,6 +13,8 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 
+import monitoring
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -79,6 +81,7 @@ def risk_level(probability, threshold):
 def predict(frame, source="Manual"):
     """API adapter. Returns serializable records ready for the UI or a REST response."""
     data = prepare(frame)
+    identities = [monitoring.machine_id(v) for v in frame["Machine ID"].tolist()] if "Machine ID" in frame else [None] * len(data)
     model, threshold, version = assets()
     started = perf_counter()
     probabilities = model.predict_proba(data)[:, 1]
@@ -88,11 +91,11 @@ def predict(frame, source="Manual"):
     stamp = datetime.now(IST).isoformat()
     batch = uuid.uuid4().hex[:8]
     return [{"id": f"RUN-{uuid.uuid4().hex[:8].upper()}", "timestamp": stamp,
-             "source": source, "batch": batch, "inputs": row,
+             "source": source, "batch": batch, "machine_id": identity, "inputs": row,
              "probability": float(probability), "risk": risk_level(float(probability), threshold),
              "threshold": threshold, "version": version, "latency_ms": elapsed_ms,
              "batch_size": len(data)}
-            for row, probability in zip(data.to_dict("records"), probabilities)]
+            for row, probability, identity in zip(data.to_dict("records"), probabilities, identities)]
 
 
 @contextmanager
@@ -101,22 +104,26 @@ def _connection():
     connection = sqlite3.connect(DB_PATH, timeout=15)
     try:
         with connection:
-            connection.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, payload TEXT NOT NULL)")
+            connection.execute("BEGIN IMMEDIATE")
+            monitoring.migrate(connection)
             yield connection
     finally:
         connection.close()
 
 
 def save_runs(records):
+    records = [{**r, "machine_id": monitoring.machine_id(r.get("machine_id"))} for r in records]
+    if any(r.get("source") == "Demo" or r["id"].startswith("DEMO-") for r in records):
+        raise ValueError("Demo snapshots cannot be saved to prediction history.")
     with _connection() as connection:
-        connection.executemany("INSERT OR IGNORE INTO runs VALUES (?, ?, ?)",
-                               [(r["id"], r["timestamp"], json.dumps(r)) for r in records])
+        connection.executemany("INSERT OR IGNORE INTO runs (id, timestamp, payload, machine_id) VALUES (?, ?, ?, ?)",
+                               [(r["id"], r["timestamp"], json.dumps(r), r["machine_id"]) for r in records])
 
 
-def history():
+def history(machine_id=None):
     with _connection() as connection:
-        rows = connection.execute("SELECT payload FROM runs ORDER BY timestamp DESC, rowid DESC").fetchall()
-    return [json.loads(row[0]) for row in rows]
+        rows = connection.execute("SELECT payload, machine_id FROM runs WHERE (? IS NULL OR machine_id = ?) ORDER BY timestamp DESC, rowid DESC", (machine_id, machine_id)).fetchall()
+    return [{**json.loads(row[0]), "machine_id": row[1]} for row in rows]
 
 
 @st.cache_data
@@ -219,7 +226,7 @@ def demo_runs(version):
 
 def table(records):
     return pd.DataFrame([{"Run ID": r["id"], "Time (IST)": datetime.fromisoformat(r["timestamp"]).astimezone(IST).strftime("%d %b %H:%M:%S"),
-                          "Type": r["inputs"]["Type"], "Risk": r["risk"], "Failure probability": r["probability"],
+                          "Machine ID": r.get("machine_id") or "Unassigned", "Type": r["inputs"]["Type"], "Risk": r["risk"], "Failure probability": r["probability"],
                           "Source": r["source"], "Inference (ms)": round(r["latency_ms"], 2), "Batch size": r["batch_size"]} for r in records])
 
 
@@ -227,3 +234,4 @@ def export_csv(records):
     """Flat, reproducible export including the original inputs and derived features."""
     rows = [{**{k: v for k, v in r.items() if k != "inputs"}, **r["inputs"]} for r in records]
     return pd.DataFrame(rows).to_csv(index=False).encode("utf-8")
+

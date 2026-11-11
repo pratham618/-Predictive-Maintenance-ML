@@ -15,12 +15,12 @@ def pdf_report(records, title="Prediction report"):
     content = [Paragraph(escape(title), styles["Title"]), Paragraph("Prediction Model | Equipment failure intelligence", styles["Detail"]), Spacer(1,14)]
     if records:
         content += [Paragraph(f"{len(records)} snapshot(s) | Source: {escape(', '.join(sorted(set(r['source'] for r in records))))} | Model artifact: {escape(records[0]['version'])}", styles["Detail"]), Spacer(1,10)]
-    rows = [["Run ID", "Time (IST)", "Type", "Risk", "Failure", "Threshold", "Batch ms"]]
+    rows = [["Run ID", "Machine ID", "Time (IST)", "Type", "Risk", "Failure", "Threshold", "Batch ms"]]
     from services import IST
     from datetime import datetime
     for r in records:
-        rows.append([r["id"], datetime.fromisoformat(r["timestamp"]).astimezone(IST).strftime("%d %b %H:%M"), r["inputs"]["Type"], r["risk"], f"{r['probability']:.1%}", f"{r['threshold']:.0%}", f"{r['latency_ms']:.2f}"])
-    t = Table(rows, repeatRows=1, colWidths=[132,130,55,65,80,80,90])
+        rows.append([r["id"], Paragraph(escape(r.get("machine_id") or "Unassigned"), styles["Detail"]), datetime.fromisoformat(r["timestamp"]).astimezone(IST).strftime("%d %b %H:%M"), r["inputs"]["Type"], r["risk"], f"{r['probability']:.1%}", f"{r['threshold']:.0%}", f"{r['latency_ms']:.2f}"])
+    t = Table(rows, repeatRows=1, colWidths=[110,110,110,40,55,65,65,65])
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#12151C")),("TEXTCOLOR",(0,0),(-1,0),colors.white),
                           ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),9),
                           ("TOPPADDING",(0,0),(-1,-1),8),("BOTTOMPADDING",(0,0),(-1,-1),8),

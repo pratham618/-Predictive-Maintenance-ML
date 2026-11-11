@@ -7,6 +7,7 @@ import pandas as pd
 import altair as alt
 import streamlit as st
 
+import monitoring
 import services as api
 import evaluation
 import ui
@@ -38,7 +39,7 @@ def overview():
     demo = st.session_state.get("demo_mode", True)
     records = api.demo_runs(version) if demo else api.history()
     with st.container(horizontal=True, horizontal_alignment="distribute"):
-        st.caption("DEMO FEED · Reference samples with illustrative timestamps" if demo else "LIVE WORKSPACE · Your saved prediction runs")
+        st.caption("DEMO FEED · Reference samples with illustrative timestamps" if demo else "SAVED WORKSPACE · Your saved prediction runs")
         st.caption("Times shown in IST  ·  Local inference")
     scores = api.metrics()
     actual = api.history()
@@ -75,6 +76,8 @@ def overview():
                 st.caption(f"{record['risk']} risk · {record['probability']:.1%} failure probability · {record['source']} source")
                 ui.key_values([(k,v) for k,v in record["inputs"].items() if k in api.INPUTS])
                 if st.button("Use these inputs", key="recent_reuse"):
+                    st.session_state["reference_input"] = record["source"] in ("Demo", "Sample", "Reference CSV")
+                    st.session_state["asset_id"] = record.get("machine_id") or ""
                     st.session_state["pending_inputs"] = record["inputs"]
                     st.switch_page("app_pages/predict.py")
 
@@ -119,8 +122,11 @@ def prediction():
             choice = sample_col.selectbox("Sample scenario", ["Normal operation", "Reference failure sample"], key="scenario")
             if sample_button.button("Load sample", width="stretch"):
                 _set_inputs(api.SAMPLE if choice == "Normal operation" else api.dataset().query('`Machine failure` == 1').iloc[0].to_dict())
+                st.session_state["reference_input"] = True
                 st.toast("Sample loaded. Select Analyze machine to run it.")
             with st.form("machine_inputs", border=False):
+                identity = st.text_input("Machine ID (optional)", key="asset_id", max_chars=64, persist_state="session", help="Use the same asset ID on every assessment. Blank snapshots stay unassigned.")
+                reference_input = st.checkbox("These are sample or simulated readings", key="reference_input", value=True, persist_state="session", help="Leave checked for loaded samples. Clear only for actual asset readings.")
                 c1,c2 = st.columns(2)
                 with c1:
                     st.selectbox("Machine type", ["L","M","H"], key="machine_type", help="L, M and H are the quality variants from the reference dataset.", persist_state="session")
@@ -133,9 +139,9 @@ def prediction():
                 submitted = st.form_submit_button("Analyze machine  →", type="primary", width="stretch")
             st.caption("Temperature difference and mechanical power are calculated automatically.")
         if submitted:
-            frame = pd.DataFrame([{"Type":st.session_state.machine_type,"Air temperature [K]":st.session_state.air,"Process temperature [K]":st.session_state.process,"Rotational speed [rpm]":st.session_state.speed,"Torque [Nm]":st.session_state.torque,"Tool wear [min]":st.session_state.wear}])
+            frame = pd.DataFrame([{"Machine ID":identity,"Type":st.session_state.machine_type,"Air temperature [K]":st.session_state.air,"Process temperature [K]":st.session_state.process,"Rotational speed [rpm]":st.session_state.speed,"Torque [Nm]":st.session_state.torque,"Tool wear [min]":st.session_state.wear}])
             try:
-                _run(frame, "Manual")
+                _run(frame, "Sample" if reference_input else "Manual")
             except Exception as exc:
                 st.session_state.pop("current_result", None)
                 st.error(f"Unable to analyze: {exc}")
@@ -157,6 +163,7 @@ def prediction():
 
 
 def result_summary(record):
+    st.caption(f"Machine: {record.get('machine_id') or 'Unassigned'} · Assessed {record['timestamp']}")
     ui.gauge(record["probability"], record["risk"])
     title, recommendation = RECOMMENDATIONS[record["risk"]]
     st.markdown(f"**{title}**")
@@ -198,7 +205,9 @@ def result_details(record):
 def read_upload(uploaded):
     if uploaded.size > 10*1024*1024:
         raise ValueError("Please use a CSV smaller than 10 MB.")
-    frame = pd.read_csv(BytesIO(uploaded.getvalue()))
+    frame = pd.read_csv(BytesIO(uploaded.getvalue()), dtype={"Machine ID": str}, keep_default_na=False)
+    if "Machine ID" in frame:
+        frame["Machine ID"] = frame["Machine ID"].map(monitoring.machine_id)
     api.prepare(frame)
     return frame
 
@@ -206,9 +215,10 @@ def read_upload(uploaded):
 def batch_prediction():
     with st.container(border=True):
         ui.section("Batch inference", "Upload up to 5,000 operating snapshots", "database", "CSV")
-        st.download_button("Download CSV template",pd.DataFrame([api.SAMPLE]).to_csv(index=False),file_name="machine-input-template.csv",mime="text/csv")
-        upload=st.file_uploader("Drop a CSV here or browse files",type=["csv"],key="batch_upload",help="Required columns match the template. Extra columns are ignored; derived features are recalculated.")
+        st.download_button("Download CSV template",pd.DataFrame([{"Machine ID": "MACHINE-001", **api.SAMPLE}]).to_csv(index=False),file_name="machine-input-template.csv",mime="text/csv")
+        upload=st.file_uploader("Drop a CSV here or browse files",type=["csv"],key="batch_upload",help="Required columns match the template. Optional Machine ID tracks each asset; use text IDs. Other extra columns are ignored; derived features are recalculated.")
         frame=None
+        reference_batch = st.checkbox("This CSV contains reference or simulated data", value=True, key="reference_batch", help="Clear only for actual asset readings. Reference data is excluded from machine alerts.")
         if upload:
             fingerprint=hashlib.sha256(upload.getvalue()).hexdigest()
             if fingerprint != st.session_state.get("batch_fingerprint"):
@@ -228,7 +238,7 @@ def batch_prediction():
             st.caption(f"Using uploaded dataset · {len(frame):,} rows")
         if st.button("Analyze batch  →",type="primary",disabled=frame is None,width="stretch"):
             try:
-                st.session_state["batch_results"]=_run(frame,"CSV batch")
+                st.session_state["batch_results"]=_run(frame,"Reference CSV" if reference_batch else "CSV batch")
             except Exception as exc:
                 st.session_state.pop("batch_results",None)
                 st.error(f"Unable to analyze batch: {exc}")
@@ -248,13 +258,14 @@ def batch_prediction():
 def history_page():
     ui.heading("Prediction history", "A traceable record of every machine assessment.", "WORKSPACE / HISTORY")
     records=api.history()
+    machine_monitor(records)
     with st.container(border=True):
         ui.section("Run log", "Saved on this computer · Demo feed excluded", "history", f"{len(records):,} RUNS")
         c1,c2,c3=st.columns([2,1,1])
-        search=c1.text_input("Search runs",placeholder="Run ID, machine type, source…")
+        search=c1.text_input("Search runs",placeholder="Machine ID, run ID, type, source…")
         risk=c2.selectbox("Risk level",["All","Low","Medium","High"])
-        source=c3.selectbox("Source",["All","Manual","CSV batch"])
-        filtered=[r for r in records if (risk=="All" or r["risk"]==risk) and (source=="All" or r["source"]==source) and (not search or search.casefold() in f"{r['id']} {r['inputs']['Type']} {r['source']} {r['timestamp']}".casefold())]
+        source=c3.selectbox("Source",["All","Manual","CSV batch","Sample","Reference CSV"])
+        filtered=[r for r in records if (risk=="All" or r["risk"]==risk) and (source=="All" or r["source"]==source) and (not search or search.casefold() in f"{r['id']} {r.get('machine_id') or 'Unassigned'} {r['inputs']['Type']} {r['source']} {r['timestamp']}".casefold())]
         if not filtered and records:
             ui.empty("No matching runs", "Try another search or clear the filters.","search")
         else:
@@ -265,6 +276,8 @@ def history_page():
                 record=filtered[selected.selection.rows[0]]
                 ui.section(f"Run {record['id']}","Selected snapshot", "cpu")
                 if st.button("Reuse inputs in a new prediction",key="history_reuse"):
+                    st.session_state["reference_input"] = record["source"] in ("Demo", "Sample", "Reference CSV")
+                    st.session_state["asset_id"] = record.get("machine_id") or ""
                     st.session_state["pending_inputs"]=record["inputs"]
                     st.switch_page("app_pages/predict.py")
                 result_summary(record)
@@ -415,7 +428,7 @@ def settings():
         ui.section("Operator profile","Local workspace identity · no sign-in required","shield")
         with st.form("preferences",border=False):
             name=st.text_input("Display name",value=st.session_state.get("operator_name","Local operator"),max_chars=60)
-            notifications=st.checkbox("Show high-risk run notifications",value=st.session_state.get("show_alerts",True))
+            notifications=st.checkbox("Show machine notifications",value=st.session_state.get("show_alerts",True))
             if st.form_submit_button("Save preferences",type="primary"):
                 st.session_state["operator_name"]=name.strip() or "Local operator"
                 st.session_state["show_alerts"]=notifications
@@ -429,3 +442,33 @@ def settings():
         st.divider()
         ui.section("Keyboard shortcuts","Navigate without leaving the keyboard","layers")
         ui.key_values([("Search workspace","Ctrl / Cmd + K"),("New prediction","Ctrl / Cmd + Shift + P"),("Close dialog","Esc"),("Move between controls","Tab / Shift + Tab")])
+
+
+def machine_monitor(records):
+    st.subheader("Machine monitoring")
+    st.caption("Saved assessments only · no live sensor connection. Alerts use the latest snapshot per asset. Times shown in IST.")
+    summaries = monitoring.summarize(records)
+    if not summaries:
+        st.info("Add a Machine ID when running a prediction to start tracking an asset. Existing unassigned records remain in the run log.")
+        return
+    st.dataframe(pd.DataFrame([{
+        "Machine ID": s["machine_id"], "Last assessed": s["latest"]["timestamp"],
+        "Failure probability": s["latest"]["probability"], "Risk": s["latest"]["risk"],
+        "Change (percentage points)": None if s["delta"] is None else round(s["delta"] * 100, 2),
+        "Alerts": "; ".join(s["alerts"]) or "No elevated risk in latest assessment"
+    } for s in summaries]), hide_index=True, alt="Latest saved assessment and alerts for each assigned machine")
+    identity = st.selectbox("Inspect machine", [s["machine_id"] for s in summaries])
+    summary = next(s for s in summaries if s["machine_id"] == identity)
+    for alert in summary["alerts"]:
+        st.warning(alert)
+    if summary["delta"] is None:
+        st.caption("Trend unavailable: need two distinct assessment times with the same model version and threshold.")
+    history = summary["history"]
+    versions = list(dict.fromkeys((r["version"], r["threshold"]) for r in history))
+    version, threshold = st.selectbox("Model / threshold", versions, format_func=lambda x: f"{x[0]} / {x[1]:.0%}")
+    series = [r for r in history if (r["version"], r["threshold"]) == (version, threshold)]
+    ui.risk_chart(series, threshold)
+    st.caption("Each point is a saved prediction, not continuous telemetry. Different model versions and thresholds are charted separately.")
+    ui.runs_table(list(reversed(history)), "machine_history", height=300)
+    exports(list(reversed(history)), "machine_")
+
