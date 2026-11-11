@@ -104,3 +104,8 @@ Use deployment secrets for credentials. Point `assets()`, `metrics()`, `importan
 All six screens were tested with Streamlit AppTest. Real single and batch predictions, input rejection, threshold boundaries, persistent history, filtering, appearance changes and exports were exercised. Exact TreeSHAP contributions were checked against the model probability. PDF output was rendered and reviewed. Browser checks cover the actual rendered interface; this is not a formal WCAG conformance audit.
 
 Backups: the original app remains in `app/app.py.bak`, and the preceding light dashboard is in `app/app.light-dashboard.py.bak`.
+## Machine monitoring update
+
+See [MACHINE_MONITORING.md](MACHINE_MONITORING.md) for asset IDs, timestamped
+history, risk trends, alerts, sample-data declarations and SQLite migration.
+

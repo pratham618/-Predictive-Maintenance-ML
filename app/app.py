@@ -12,12 +12,13 @@ if str(APP_DIR) not in sys.path:
 import streamlit as st
 
 # Refresh edited local helpers in long-lived previews. A normal run reuses them.
-for module_name in ["evaluation", "services", "ui", "reports", "views"]:
+for module_name in ["evaluation", "monitoring", "services", "ui", "reports", "views"]:
     module = importlib.import_module(module_name)
     stamp = Path(module.__file__).stat().st_mtime_ns
     if getattr(module, "_preview_source_stamp", None) != stamp:
         module = importlib.reload(module)
         module._preview_source_stamp = stamp
+import monitoring
 import services as api
 import ui
 
@@ -77,18 +78,18 @@ with st.container(key="topbar"):
         st.markdown("**Workspace alerts**")
         if st.session_state.show_alerts:
             try:
-                high=[r for r in api.history() if r["risk"]=="High"]
-                if high:
-                    st.warning(f"{len(high)} high-risk snapshot(s) in saved history.")
-                    for record in high[:3]:
-                        st.caption(f"{record['id']} · {record['probability']:.1%}")
-                    st.page_link("app_pages/history.py",label="Review history →")
+                alerts = [s for s in monitoring.summarize(api.history()) if s["alerts"]]
+                if alerts:
+                    st.warning(f"{len(alerts)} machine(s) need attention.")
+                    for machine in alerts[:3]:
+                        st.caption(f"{machine['machine_id']} · {'; '.join(machine['alerts'])}")
+                    st.page_link("app_pages/history.py", label="Review machine monitoring →")
                 else:
-                    st.caption("No high-risk snapshots in your local history.")
+                    st.caption("No machine alerts in saved assessments. Unassigned runs are excluded.")
             except Exception as exc:
                 st.error(f"Could not read alerts: {exc}")
         else:
-            st.caption("High-risk notifications are muted in Settings.")
+            st.caption("Machine notifications are muted in Settings.")
         st.caption("Alerts reflect saved assessments, not a live sensor feed.")
     with profile, st.popover("Operator",width="stretch"):
         st.markdown(f"**{escape(st.session_state.operator_name)}**")
@@ -108,3 +109,4 @@ except Exception as exc:
     st.caption("Check that the saved model and reference dataset are available, then refresh the page.")
 
 st.html('<div class="pm-footer"><span>prediction model / machine intelligence</span><span>Local inference · All times IST</span></div>')
+
