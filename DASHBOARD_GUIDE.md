@@ -1,5 +1,9 @@
 # Prediction Model — dashboard guide
 
+The current interface follows the operations-first minimal dark layout documented
+in [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md). Its navigation, Overview and prediction
+presentation supersede the original design description below.
+
 ## Design rationale
 
 The interface uses a near-black #0B0D12 canvas, #12151C cards, and #1A1E27 controls to create depth without visual noise. Electric cyan #61D9EF highlights the primary action and key data. Muted violet provides a secondary accent; green, amber, and red always accompany written risk labels.

@@ -1,5 +1,6 @@
 """Reusable display components and chart styling for Prediction Model."""
 from pathlib import Path
+from datetime import datetime
 from html import escape
 import base64
 import altair as alt
@@ -42,7 +43,7 @@ def inject_style():
     css = (Path(__file__).parent / "styles.css").read_text(encoding="utf-8")
     if st.session_state.get("light_mode"):
         css += '\n:root {--pm-bg:#f4f6f9;--pm-surface:#ffffff;--pm-raised:#edf1f6;--pm-text:#182334;--pm-muted:#536276;--pm-border:#d8dfe8;--pm-accent:#08758b;--pm-accent-ink:#ffffff;--pm-secondary:#7466bc;--pm-green:#157448;--pm-amber:#8d580a;--pm-red:#b63143;}\n'
-    color = "#08758b" if st.session_state.get("light_mode") else "#61d9ef"
+    color = "#08758b" if st.session_state.get("light_mode") else "#66cbb8"
     css += '\n.pm-icon { display:inline-block; flex-shrink:0; background-position:center; background-size:contain; background-repeat:no-repeat; }\n'
     for name in ICONS:
         uri = base64.b64encode(_svg(name, color).encode()).decode()
@@ -51,11 +52,15 @@ def inject_style():
 
 
 def heading(title, subtitle, eyebrow="PREDICTIVE MAINTENANCE"):
-    st.html(f'<div class="pm-eyebrow">{escape(eyebrow)}</div><h1 class="pm-title">{escape(title)}</h1><p class="pm-subtitle">{escape(subtitle)}</p>')
+    st.caption(eyebrow)
+    st.title(title)
+    st.caption(subtitle)
 
 
 def section(title, subtitle="", icon="activity", chip=""):
-    st.html(f'<div class="pm-card-header"><div><div class="pm-section-title">{svg(icon)}{escape(title)}</div><span class="pm-label">{escape(subtitle)}</span></div>{f"<span class=pm-chip>{escape(chip)}</span>" if chip else ""}</div>')
+    st.markdown(f"**{title}**")
+    if subtitle or chip:
+        st.caption(" · ".join(part for part in (subtitle, chip) if part))
 
 
 def key_values(values):
@@ -74,23 +79,23 @@ def chart_style(chart, height=220):
     light = st.session_state.get("light_mode", False)
     fg, grid = ("#536276", "#e1e6ed") if light else ("#97a3b7", "#242a35")
     return chart.properties(height=height, background="transparent").configure_view(strokeWidth=0).configure_axis(
-        gridColor=grid, domain=False, tickColor=grid, labelColor=fg, titleColor=fg, labelFont="Inter", titleFont="Inter", titleFontWeight=400, labelFontSize=10, titleFontSize=10, labelPadding=9, titlePadding=12
-    ).configure_legend(labelColor=fg, titleColor=fg, labelFont="Inter", titleFont="Inter", orient="bottom")
+        gridColor=grid, domain=False, tickColor=grid, labelColor=fg, titleColor=fg, labelFont="Segoe UI", titleFont="Segoe UI", titleFontWeight=400, labelFontSize=12, titleFontSize=12, labelPadding=9, titlePadding=12
+    ).configure_legend(labelColor=fg, titleColor=fg, labelFont="Segoe UI", titleFont="Segoe UI", orient="bottom")
 
 
 def risk_chart(records, threshold):
     df = pd.DataFrame({"Time": [r["timestamp"] for r in records], "Failure probability": [r["probability"] for r in records], "Run": [r["id"] for r in records]})
-    df["Time"] = pd.to_datetime(df["Time"], utc=True).dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
-    base = alt.Chart(df.sort_values("Time")).encode(x=alt.X("Time:T", title=None, axis=alt.Axis(format="%H:%M")), y=alt.Y("Failure probability:Q", scale=alt.Scale(domain=[0,1]), axis=alt.Axis(format="%"), title=None))
-    area = base.mark_area(color="#61d9ef", opacity=.08)
-    line = base.mark_line(color="#61d9ef", strokeWidth=2, point=alt.OverlayMarkDef(size=18)).encode(tooltip=[alt.Tooltip("Time:T", format="%d %b %H:%M"), "Run:N", alt.Tooltip("Failure probability:Q", format=".1%")])
+    df["Time"] = pd.to_datetime(df["Time"], utc=True, format="mixed").dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+    base = alt.Chart(df.sort_values("Time")).encode(x=alt.X("Time:T", title=None, axis=alt.Axis(format="%d %b %H:%M", tickCount=4, labelOverlap=True)), y=alt.Y("Failure probability:Q", scale=alt.Scale(domain=[0,1]), axis=alt.Axis(format="%"), title=None))
+    area = base.mark_area(color="#66cbb8", opacity=.08)
+    line = base.mark_line(color="#66cbb8", strokeWidth=2, point=alt.OverlayMarkDef(size=18)).encode(tooltip=[alt.Tooltip("Time:T", format="%d %b %H:%M"), "Run:N", alt.Tooltip("Failure probability:Q", format=".1%")])
     rule = alt.Chart(pd.DataFrame({"Threshold": [threshold]})).mark_rule(color="#f4c16b", strokeDash=[4,5], opacity=.65).encode(y="Threshold:Q", tooltip=[alt.Tooltip("Threshold:Q", format=".0%")])
     st.altair_chart(chart_style(area + line + rule, 220), theme=None, alt="Failure probability by run time in IST. Dashed amber line is the saved failure threshold.")
 
 
 def feature_chart(frame, local=True):
     value = "Contribution" if local else "Importance"
-    colors = alt.Color("Effect:N", scale=alt.Scale(domain=["Raises risk", "Lowers risk"], range=["#ff8893", "#61d9ef"]), title=None) if local else alt.value("#61d9ef")
+    colors = alt.Color("Effect:N", scale=alt.Scale(domain=["Raises risk", "Lowers risk"], range=["#ff8893", "#66cbb8"]), title=None) if local else alt.value("#66cbb8")
     chart = alt.Chart(frame).mark_bar(cornerRadiusEnd=3, size=13).encode(
         y=alt.Y("Feature:N", sort=frame["Feature"].tolist(), title=None, axis=alt.Axis(labelLimit=210)),
         x=alt.X(f"{value}:Q", title="Contribution to failure log-odds" if local else "Relative importance", axis=alt.Axis(format=".2f" if local else ".0%")),
@@ -99,8 +104,29 @@ def feature_chart(frame, local=True):
 
 
 def gauge(probability, risk):
-    token = {"Low": "green", "Medium": "amber", "High": "red"}[risk]
-    st.html(f'<div role="img" aria-label="Failure probability {probability:.1%}, {risk} risk" class="pm-gauge" style="--risk-angle:{probability*360:.3f}deg;--risk-color:var(--pm-{token})"><div class="pm-gauge-center"><div class="pm-gauge-value">{probability:.1%}</div><div class="pm-gauge-label">failure probability</div></div></div><div class="pm-risk" style="color:var(--pm-{token})">{risk} risk</div>')
+    st.metric("Failure probability", f"{probability:.1%}")
+    st.progress(float(probability))
+    st.badge(f"{risk} risk", color={"Low": "green", "Medium": "orange", "High": "red"}[risk])
+
+
+def time_label(value):
+    from services import IST
+    stamp = datetime.fromisoformat(value)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=IST)
+    return stamp.astimezone(IST).strftime("%d %b %Y · %H:%M IST")
+
+
+def machine_table(summaries, key):
+    frame = pd.DataFrame([{
+        "Machine": s["machine_id"], "Risk": s["latest"]["risk"],
+        "Failure probability": s["latest"]["probability"],
+        "Assessment": time_label(s["latest"]["timestamp"]),
+        "Alerts": "; ".join(s["alerts"]) or "No elevated risk in latest snapshot",
+    } for s in summaries])
+    st.dataframe(frame, key=key, hide_index=True, height=min(330, 40 + 36 * len(frame)),
+                 column_config={"Failure probability": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1)},
+                 alt="Latest saved machine risks, assessment times and alerts")
 
 
 def runs_table(records, key, selectable=False, height=245):

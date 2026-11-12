@@ -8,6 +8,7 @@ import altair as alt
 import streamlit as st
 
 import monitoring
+import maintenance
 import services as api
 import evaluation
 import ui
@@ -29,57 +30,80 @@ def exports(records, key):
 
 
 def overview():
-    model, threshold, version = api.assets()
-    top, action = st.columns([4,1], vertical_alignment="bottom")
-    with top:
-        ui.heading("System overview", "Every signal in context. Every decision, informed.", "WORKSPACE / OVERVIEW")
-    with action:
-        if st.button("Run prediction  →", type="primary", width="stretch", key="overview_run"):
+    ui.heading("Overview", "Machine condition, outstanding work, and your latest assessments.", "OPERATIONS")
+    with st.container(horizontal=True, vertical_alignment="center"):
+        if st.button("Run prediction", type="primary", icon=":material/play_arrow:", key="overview_run"):
             st.switch_page("app_pages/predict.py")
-    demo = st.session_state.get("demo_mode", True)
-    records = api.demo_runs(version) if demo else api.history()
-    with st.container(horizontal=True, horizontal_alignment="distribute"):
-        st.caption("DEMO FEED · Reference samples with illustrative timestamps" if demo else "SAVED WORKSPACE · Your saved prediction runs")
-        st.caption("Times shown in IST  ·  Local inference")
-    scores = api.metrics()
+        st.page_link("app_pages/maintenance.py", label="Manage maintenance", icon=":material/build:")
     actual = api.history()
-    single_latency = [r["latency_ms"] for r in actual if r["batch_size"] == 1]
-    cols = st.columns(4)
-    cols[0].metric("Validation accuracy", f"{scores['accuracy']:.2%}", "2,000 validation samples", delta_color="off", border=True, help="Original notebook split, also used to tune the threshold. Not an independent final test.")
-    cols[1].metric("Median inference", f"{np.median(single_latency):.1f} ms" if single_latency else "—", "Real single-snapshot runs" if single_latency else "Run a prediction to measure", delta_color="off", border=True, chart_data=single_latency[-15:] or None)
-    cols[2].metric("Prediction runs", f"{len(records):,}", "Demo snapshots" if demo else "Saved locally", delta_color="off", border=True)
-    cols[3].metric("Drift monitor", "Not set", "Needs a production baseline", delta_color="off", border=True, help="No live sensor feed or drift detector is configured. This is not a zero-alert claim.")
-    st.space("small")
-    main, side = st.columns([2.15,1], gap="medium")
+    operating = [r for r in actual if maintenance.eligible(r)]
+    summaries = monitoring.summarize(operating)
+    work = maintenance.latest(api.work_history(), "work_id")
+    open_work = [w for w in work if w["status"] in ("Open", "In progress")]
+    high = [s for s in summaries if s["latest"]["risk"] == "High"]
+    attention = [s for s in summaries if s["alerts"]]
+    with st.container(horizontal=True, horizontal_alignment="distribute"):
+        st.badge("Saved operating assessments", icon=":material/save:", color="gray")
+        st.caption("No live sensor connection · Times shown in IST")
+    with st.container(horizontal=True, key="overview_metrics"):
+        st.metric("Machines tracked", len(summaries), border=True, help="Assigned machines with saved actual operating readings. Samples are excluded.")
+        st.metric("High risk", len(high), border=True, help="Latest saved risk per machine, including stale assessments. Not confirmed failures.")
+        st.metric("Need attention", len(attention), border=True, help="Machines with high, watch, rising-risk or stale-assessment alerts.")
+        st.metric("Open work", len(open_work), border=True, help="Latest work status is Open or In progress. Independent of model risk.")
+    main, side = st.columns([2, 1], gap="medium")
     with main, st.container(border=True):
-        ui.section("Prediction activity", "Failure probability across analyzed snapshots", "activity", "DEMO · 24 HOURS" if demo else "SAVED RUNS")
-        if records:
-            ui.risk_chart(records[:200], threshold)
-            low = sum(r["risk"] == "Low" for r in records)
-            medium = sum(r["risk"] == "Medium" for r in records)
-            high = sum(r["risk"] == "High" for r in records)
-            st.caption(f"●  Low: {low}      ◇  Medium: {medium}      ▲  High: {high}      ·      Failure threshold {threshold:.0%}")
+        ui.section("Machine status", "Latest saved assessment per asset", chip=f"{len(operating):,} operating readings")
+        if summaries:
+            ordered = sorted(summaries, key=lambda s: (s["latest"]["risk"] != "High", not bool(s["alerts"]), s["machine_id"]))
+            ui.machine_table(ordered, key="overview_machines")
+            st.page_link("app_pages/history.py", label="Inspect machine histories", icon=":material/arrow_forward:")
         else:
-            ui.empty("Your timeline starts here", "Run a prediction, or enable the demo feed in the sidebar to explore the overview.")
+            ui.empty("No operating assessments yet", "Add a Machine ID and actual readings to start monitoring. Sample predictions remain in History.")
+            st.caption("Zero machines does not establish that equipment is healthy.")
     with side, st.container(border=True):
-        ui.section("Model status", "Connected to your local model", "cpu", "READY")
-        st.html(f'<div class="pm-model-visual"><div class="pm-model-node">{ui.svg("database")}</div><div class="pm-model-line"></div><div class="pm-model-node pm-model-core">{ui.svg("cpu",size=28)}</div><div class="pm-model-line"></div><div class="pm-model-node">{ui.svg("activity")}</div></div>')
-        ui.key_values([("Engine", "XGBoost classifier"), ("Artifact version", version), ("Decision threshold", f"{threshold:.0%}"), ("Last trained", "Not recorded"), ("Input features", "6 inputs → 8 features")])
-        st.page_link("app_pages/performance.py", label="Explore model performance  ↗")
+        ui.section("Work to follow up", "Inspections and maintenance")
+        if open_work:
+            for item in open_work[:3]:
+                st.markdown(f"**{item['machine_id']}** · {item['status']}")
+                st.text(item["description"])
+            if len(open_work) > 3:
+                st.caption(f"+ {len(open_work) - 3} more open work items")
+        else:
+            st.caption("No open work items recorded.")
+        st.page_link("app_pages/maintenance.py", label="Open work log", icon=":material/build:")
     with st.container(border=True):
-        ui.section("Recent activity", "Select a run to inspect its operating snapshot", "history", "DEMO" if demo else "LOCAL HISTORY")
-        recent = records[:6]
-        selected = ui.runs_table(recent, "overview_table", selectable=True, height=245)
-        if selected and selected.selection.rows:
-            record = recent[selected.selection.rows[0]]
-            with st.expander(f"Inspect {record['id']}", expanded=True):
-                st.caption(f"{record['risk']} risk · {record['probability']:.1%} failure probability · {record['source']} source")
-                ui.key_values([(k,v) for k,v in record["inputs"].items() if k in api.INPUTS])
-                if st.button("Use these inputs", key="recent_reuse"):
-                    st.session_state["reference_input"] = record["source"] in ("Demo", "Sample", "Reference CSV")
-                    st.session_state["asset_id"] = record.get("machine_id") or ""
-                    st.session_state["pending_inputs"] = record["inputs"]
-                    st.switch_page("app_pages/predict.py")
+        ui.section("Machine risk trend", "Compare assessments for one machine at a time")
+        if summaries:
+            selected_id = st.selectbox("Machine", [s["machine_id"] for s in summaries], key="overview_machine")
+            summary = next(s for s in summaries if s["machine_id"] == selected_id)
+            latest = summary["latest"]
+            series = [r for r in summary["history"] if r["version"] == latest["version"] and r["threshold"] == latest["threshold"]]
+            ui.risk_chart(series[-200:], latest["threshold"])
+            st.caption(f"Model {latest['version']} · saved threshold {latest['threshold']:.0%} · latest assessment {ui.time_label(latest['timestamp'])}")
+            if summary["stale"]:
+                st.warning("This machine's latest assessment is over 24 hours old.")
+            st.caption("Saved snapshots, not continuous telemetry. Earlier model versions remain available in Machines & history.")
+        else:
+            st.caption("A trend appears after you save assigned operating assessments. At least two distinct times are needed to measure a change.")
+    with st.container(border=True):
+        ui.section("Recent assessments", "Includes clearly labeled sample and reference runs", chip=f"{len(actual):,} saved")
+        ui.runs_table(actual[:6], "overview_table", height=260)
+        st.page_link("app_pages/history.py", label="View all assessments", icon=":material/history:")
+    with st.expander("Model & workspace details"):
+        _, threshold, version = api.assets()
+        single_latency = [r["latency_ms"] for r in actual if r["batch_size"] == 1]
+        ui.key_values([("Model", "XGBoost"), ("Artifact", version), ("Failure threshold", f"{threshold:.0%}"),
+                       ("Median inference", f"{np.median(single_latency):.1f} ms" if single_latency else "Not measured"),
+                       ("Drift monitoring", "Not configured")])
+        st.caption("Validation performance is available separately; it is not a measure of current machine health.")
+        st.page_link("app_pages/performance.py", label="Model performance", icon=":material/analytics:")
+    with st.expander("Reference demo · illustrative data"):
+        st.toggle("Show reference demo", key="demo_mode", value=False,
+                  help="Synthetic reference samples with illustrative timestamps. Never included in the operating cards above.")
+        if st.session_state.get("demo_mode", False):
+            st.warning("Reference demo only · synthetic samples and illustrative timestamps. Not live machine data.")
+            demo = api.demo_runs(api.assets()[2])
+            ui.runs_table(demo[:6], "overview_demo", height=240)
 
 
 def _set_inputs(values):
@@ -105,7 +129,7 @@ def _run(frame, source):
 
 
 def prediction():
-    ui.heading("Run a prediction", "From operating conditions to a clear next step.", "WORKSPACE / INFERENCE")
+    ui.heading("Run a prediction", "Enter one operating snapshot. Get a risk estimate and the next step.", "OPERATIONS")
     mode = st.segmented_control("Input source", ["Manual input", "CSV batch"], default="Manual input", key="input_mode", label_visibility="collapsed")
     if mode == "CSV batch":
         batch_prediction()
@@ -118,12 +142,13 @@ def prediction():
     with left:
         with st.container(border=True):
             ui.section("Operating conditions", "One machine. One point in time.", "settings", "6 INPUTS")
-            sample_col, sample_button = st.columns([2,1], vertical_alignment="bottom")
-            choice = sample_col.selectbox("Sample scenario", ["Normal operation", "Reference failure sample"], key="scenario")
-            if sample_button.button("Load sample", width="stretch"):
-                _set_inputs(api.SAMPLE if choice == "Normal operation" else api.dataset().query('`Machine failure` == 1').iloc[0].to_dict())
-                st.session_state["reference_input"] = True
-                st.toast("Sample loaded. Select Analyze machine to run it.")
+            with st.expander("Try a reference sample"):
+                sample_col, sample_button = st.columns([2,1], vertical_alignment="bottom")
+                choice = sample_col.selectbox("Sample scenario", ["Normal operation", "Reference failure sample"], key="scenario")
+                if sample_button.button("Load sample", width="stretch"):
+                    _set_inputs(api.SAMPLE if choice == "Normal operation" else api.dataset().query('`Machine failure` == 1').iloc[0].to_dict())
+                    st.session_state["reference_input"] = True
+                    st.toast("Sample loaded. Select Analyze machine to run it.")
             with st.form("machine_inputs", border=False):
                 identity = st.text_input("Machine ID (optional)", key="asset_id", max_chars=64, persist_state="session", help="Use the same asset ID on every assessment. Blank snapshots stay unassigned.")
                 reference_input = st.checkbox("These are sample or simulated readings", key="reference_input", value=True, persist_state="session", help="Leave checked for loaded samples. Clear only for actual asset readings.")
@@ -163,17 +188,27 @@ def prediction():
 
 
 def result_summary(record):
-    st.caption(f"Machine: {record.get('machine_id') or 'Unassigned'} · Assessed {record['timestamp']}")
+    sample = record["source"] in ("Demo", "Sample", "Reference CSV")
+    st.badge("Sample / reference assessment" if sample else "Saved operating assessment", color="orange" if sample else "gray")
+    st.caption(f"{record.get('machine_id') or 'Unassigned machine'} · {ui.time_label(record['timestamp'])}")
     ui.gauge(record["probability"], record["risk"])
     title, recommendation = RECOMMENDATIONS[record["risk"]]
     st.markdown(f"**{title}**")
     st.caption(recommendation)
-    ui.key_values([("Failure threshold", f"{record['threshold']:.0%}"), ("Inference duration", f"{record['latency_ms']:.2f} ms"), ("Run", record["id"])])
+    st.caption(f"Failure threshold {record['threshold']:.0%} · Model estimate, not a calibrated confidence score.")
+    with st.expander("Assessment record"):
+        ui.key_values([("Run", record["id"]), ("Model version", record["version"]), ("Inference duration", f"{record['latency_ms']:.2f} ms")])
     if record["batch_size"] > 1:
         st.caption(f"Duration covers the complete {record['batch_size']:,}-row batch.")
 
 
 def result_details(record):
+    with st.expander("Explanation, inputs & downloads", key=f"details_{record['id']}", on_change="rerun") as details:
+        if details.open:
+            _result_details_expanded(record)
+
+
+def _result_details_expanded(record):
     row = record["inputs"]
     st.space("small")
     cols = st.columns(4)
@@ -189,7 +224,7 @@ def result_details(record):
         try:
             frame, baseline = api.explain(record)
             ui.feature_chart(frame)
-            st.caption("Cyan lowers the model's failure score; red raises it. Contributions are in log-odds and describe the model, not physical causes.")
+            st.caption("Teal lowers the model's failure score; red raises it. Contributions are in log-odds and describe the model, not physical causes.")
             with st.expander("Explanation details"):
                 st.caption(f"Baseline log-odds: {baseline:.4f}. Contributions plus baseline reconstruct the raw model score.")
                 st.dataframe(frame, hide_index=True, alt="Exact signed TreeSHAP contributions")
@@ -256,9 +291,9 @@ def batch_prediction():
 
 
 def history_page():
-    ui.heading("Prediction history", "A traceable record of every machine assessment.", "WORKSPACE / HISTORY")
+    ui.heading("Machines & history", "Inspect a machine, follow its risk trend, or find a saved assessment.", "OPERATIONS")
     records=api.history()
-    machine_monitor(records)
+    machine_monitor(records, work=maintenance.latest(api.work_history(), "work_id"))
     with st.container(border=True):
         ui.section("Run log", "Saved on this computer · Demo feed excluded", "history", f"{len(records):,} RUNS")
         c1,c2,c3=st.columns([2,1,1])
@@ -303,7 +338,7 @@ def performance():
         st.altair_chart(ui.chart_style(rect+text,220),theme=None,alt="Confusion matrix for the reproduced validation split")
     with right,st.container(border=True):
         ui.section("Precision & recall", "Trade-off across decision thresholds", "chart",f"F1 {m['f1']:.3f}")
-        chart=alt.Chart(m["pr"]).mark_line(color="#61d9ef",strokeWidth=2).encode(x=alt.X("Recall:Q",scale=alt.Scale(domain=[0,1]),axis=alt.Axis(format="%")),y=alt.Y("Precision:Q",scale=alt.Scale(domain=[0,1]),axis=alt.Axis(format="%")),tooltip=[alt.Tooltip("Recall:Q",format=".1%"),alt.Tooltip("Precision:Q",format=".1%")])
+        chart=alt.Chart(m["pr"]).mark_line(color="#66cbb8",strokeWidth=2).encode(x=alt.X("Recall:Q",scale=alt.Scale(domain=[0,1]),axis=alt.Axis(format="%")),y=alt.Y("Precision:Q",scale=alt.Scale(domain=[0,1]),axis=alt.Axis(format="%")),tooltip=[alt.Tooltip("Recall:Q",format=".1%"),alt.Tooltip("Precision:Q",format=".1%")])
         st.altair_chart(ui.chart_style(chart,220),theme=None,alt="Precision recall curve; increasing recall generally reduces precision")
     left,right=st.columns([1.5,1])
     with left,st.container(border=True):
@@ -444,19 +479,14 @@ def settings():
         ui.key_values([("Search workspace","Ctrl / Cmd + K"),("New prediction","Ctrl / Cmd + Shift + P"),("Close dialog","Esc"),("Move between controls","Tab / Shift + Tab")])
 
 
-def machine_monitor(records):
+def machine_monitor(records, work=None):
     st.subheader("Machine monitoring")
     st.caption("Saved assessments only · no live sensor connection. Alerts use the latest snapshot per asset. Times shown in IST.")
     summaries = monitoring.summarize(records)
     if not summaries:
         st.info("Add a Machine ID when running a prediction to start tracking an asset. Existing unassigned records remain in the run log.")
         return
-    st.dataframe(pd.DataFrame([{
-        "Machine ID": s["machine_id"], "Last assessed": s["latest"]["timestamp"],
-        "Failure probability": s["latest"]["probability"], "Risk": s["latest"]["risk"],
-        "Change (percentage points)": None if s["delta"] is None else round(s["delta"] * 100, 2),
-        "Alerts": "; ".join(s["alerts"]) or "No elevated risk in latest assessment"
-    } for s in summaries]), hide_index=True, alt="Latest saved assessment and alerts for each assigned machine")
+    ui.machine_table(summaries, key="history_machines")
     identity = st.selectbox("Inspect machine", [s["machine_id"] for s in summaries])
     summary = next(s for s in summaries if s["machine_id"] == identity)
     for alert in summary["alerts"]:
@@ -471,4 +501,14 @@ def machine_monitor(records):
     st.caption("Each point is a saved prediction, not continuous telemetry. Different model versions and thresholds are charted separately.")
     ui.runs_table(list(reversed(history)), "machine_history", height=300)
     exports(list(reversed(history)), "machine_")
+    if work is not None:
+        relevant = [w for w in work if w["machine_id"] == identity]
+        with st.container(border=True):
+            ui.section("Maintenance for this machine", chip=f"{len(relevant)} work items")
+            if relevant:
+                st.dataframe(pd.DataFrame([{"Work": w["description"], "Status": w["status"], "Updated": ui.time_label(w["recorded_at"])} for w in relevant]),
+                             hide_index=True, alt="Maintenance work for the selected machine")
+            else:
+                st.caption("No maintenance work recorded for this machine.")
+            st.page_link("app_pages/maintenance.py", label="Manage maintenance and outcomes", icon=":material/build:")
 
