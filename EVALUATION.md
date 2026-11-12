@@ -46,4 +46,6 @@ Run tests with the project virtual environment:
 ```
 
 Row identifiers in evaluation exports refer to CSV line numbers, not physical machines.
-Machine IDs and longitudinal risk tracking are a separate next improvement.
+Machine IDs and longitudinal risk tracking are available in History. The separate
+Maintenance & outcomes screen collects operator-confirmed assessment labels;
+its descriptive comparisons are not an independent final evaluation.

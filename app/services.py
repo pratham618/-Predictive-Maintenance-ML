@@ -14,6 +14,7 @@ import uuid
 from contextlib import contextmanager
 
 import monitoring
+import maintenance
 
 import joblib
 import numpy as np
@@ -102,10 +103,12 @@ def predict(frame, source="Manual"):
 def _connection():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH, timeout=15)
+    connection.execute("PRAGMA foreign_keys = ON")
     try:
         with connection:
             connection.execute("BEGIN IMMEDIATE")
             monitoring.migrate(connection)
+            maintenance.migrate(connection)
             yield connection
     finally:
         connection.close()
@@ -124,6 +127,31 @@ def history(machine_id=None):
     with _connection() as connection:
         rows = connection.execute("SELECT payload, machine_id FROM runs WHERE (? IS NULL OR machine_id = ?) ORDER BY timestamp DESC, rowid DESC", (machine_id, machine_id)).fetchall()
     return [{**json.loads(row[0]), "machine_id": row[1]} for row in rows]
+
+
+def confirm_outcome(run_id, outcome, notes, operator):
+    with _connection() as connection:
+        return maintenance.confirm_outcome(connection, run_id, outcome, notes, operator)
+
+
+def outcome_history(run_id=None):
+    with _connection() as connection:
+        return maintenance.outcome_history(connection, run_id)
+
+
+def create_work(identity, kind, description, notes, operator, run_id=None):
+    with _connection() as connection:
+        return maintenance.create_work(connection, identity, kind, description, notes, operator, run_id)
+
+
+def update_work(work_id, status, notes, operator):
+    with _connection() as connection:
+        return maintenance.update_work(connection, work_id, status, notes, operator)
+
+
+def work_history(work_id=None):
+    with _connection() as connection:
+        return maintenance.work_history(connection, work_id)
 
 
 @st.cache_data

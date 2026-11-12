@@ -8,6 +8,10 @@ Inter handles interface text; JetBrains Mono distinguishes metrics and machine v
 
 ## Working screens
 
+The **Maintenance & outcomes** screen adds work tracking, assessment evidence,
+corrections, descriptive prediction comparisons and audit exports.
+See [MAINTENANCE_LOG.md](MAINTENANCE_LOG.md) for the workflow and its limits.
+
 | Screen | Implemented behavior |
 | --- | --- |
 | Overview | Validation accuracy, measured single-run latency, run count, explicit drift-monitor status, probability timeline, model record, selectable recent activity. A labeled demo feed makes the charts explorable without creating fake history. |
