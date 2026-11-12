@@ -35,9 +35,9 @@ def page():
     current_outcomes = maintenance.latest(outcomes, "run_id")
     confirmed = sum(r["outcome"] != "Unverified" for r in current_outcomes)
     a, b, c = st.columns(3)
-    a.metric("Open work", sum(w["status"] in ("Open", "In progress") for w in work))
-    b.metric("Completed work", sum(w["status"] == "Completed" for w in work))
-    c.metric("Confirmed assessments", confirmed)
+    a.metric("Open work", sum(w["status"] in ("Open", "In progress") for w in work), border=True)
+    b.metric("Completed work", sum(w["status"] == "Completed" for w in work), border=True)
+    c.metric("Confirmed assessments", confirmed, border=True)
     section = st.segmented_control(
         "Maintenance section", ["Work log", "Confirm outcomes", "Prediction review"],
         default="Work log", key="maintenance_section",
