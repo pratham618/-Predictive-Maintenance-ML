@@ -12,7 +12,7 @@ if str(APP_DIR) not in sys.path:
 import streamlit as st
 
 # Refresh edited local helpers in long-lived previews. A normal run reuses them.
-for module_name in ["evaluation", "monitoring", "services", "ui", "reports", "views"]:
+for module_name in ["evaluation", "monitoring", "maintenance", "services", "ui", "reports", "views", "maintenance_views"]:
     module = importlib.import_module(module_name)
     stamp = Path(module.__file__).stat().st_mtime_ns
     if getattr(module, "_preview_source_stamp", None) != stamp:
@@ -31,7 +31,8 @@ ui.inject_style()
 
 PAGES = [
     ("overview", "Overview", "grid"), ("predict", "Run prediction", "play"),
-    ("history", "History", "history"), ("performance", "Model performance", "chart"),
+    ("history", "History", "history"), ("maintenance", "Maintenance & outcomes", "settings"),
+    ("performance", "Model performance", "chart"),
     ("datasets", "Datasets", "database"), ("settings", "Settings", "settings"),
 ]
 page = st.navigation([st.Page(f"app_pages/{slug}.py", title=label, url_path=slug, default=slug=="overview") for slug,label,_ in PAGES], position="hidden")
