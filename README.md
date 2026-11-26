@@ -1,5 +1,7 @@
 # Predictive Maintenance Dashboard
 
+[**Open the Live Demo**](https://6bmcqwk5bxdbuod5kkt9gp.streamlit.app/)
+
 A Streamlit dashboard that uses XGBoost to estimate machine failure risk from temperature, rotational speed, torque, tool wear, and machine type.
 
 ## Demo walkthrough
