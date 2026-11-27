@@ -24,11 +24,15 @@ See [MAINTENANCE_LOG.md](MAINTENANCE_LOG.md) for the workflow and its limits.
 | History | Persistent local SQLite history, risk/source filters, text search, sortable table, row inspection, reuse inputs, exports following the current filters. |
 | Model performance | Reproduced validation metrics, confusion matrix, precision-recall curve, global feature importance, artifact version, known metadata limits. |
 | Datasets | Reference dataset and session CSV uploads, data-quality counts, search/type filters, sortable preview, filtered export, hand-off to batch inference. |
-| Settings | Light appearance toggle, session operator name, notification preference, inference configuration and shortcut reference. |
+| Settings | Light appearance toggle, session operator name, notification preference, inference configuration, data management and shortcut reference. |
+
+### Data management
+
+Settings → Data management reports the database path, size, integrity check, row counts and the last saved assessment. It offers a downloadable SQLite backup. **Clear prediction history** removes saved assessments and their outcome labels while keeping maintenance work items (links to deleted assessments are cleared). **Reset workspace** additionally removes maintenance work. Both actions write a timestamped copy under `data/backups` before deleting anything, so a mistake can be recovered by restoring the backup.
 
 ## Reusable components and source layout
 
-- `app/app.py`: application shell, six-page routing, sidebar, command palette, alerts and operator menu.
+- `app/app.py`: application shell, seven-page routing, sidebar, command palette, alerts and operator menu.
 - `app/app_pages/`: small page entry points.
 - `app/views.py`: the screen layouts and user workflows.
 - `app/ui.py`: brand/icons, page headers, section headers, key-value lists, empty states, notes, chart styling, feature chart, probability gauge and run table.
@@ -36,7 +40,7 @@ See [MAINTENANCE_LOG.md](MAINTENANCE_LOG.md) for the workflow and its limits.
 - `app/services.py`: model loading, validation, feature engineering, prediction, TreeSHAP, validation metrics, demo feed and history persistence.
 - `app/reports.py`: paginated PDF reports.
 - `.streamlit/config.toml`: dark native theme and upload settings.
-- `requirements-dashboard.txt`: tested dependency versions.
+- `requirements.txt`: tested dependency versions.
 
 ## Start locally
 
@@ -49,7 +53,7 @@ From `C:\Users\prath\OneDrive\Desktop\Predictive_Maintenance_Project`:
 Open the local URL printed by Streamlit, normally http://localhost:8501. The existing virtual environment now includes ReportLab for PDF export. To restore the dashboard dependencies in another environment:
 
 ```powershell
-python -m pip install -r requirements-dashboard.txt
+python -m pip install -r requirements.txt
 ```
 
 Model and dataset paths are resolved from the project directory, independently of where the command is launched. Launch from the project root to load the theme configuration as well.
@@ -109,7 +113,7 @@ Use deployment secrets for credentials. Point `assets()`, `metrics()`, `importan
 
 ## Verification
 
-All six screens were tested with Streamlit AppTest. Real single and batch predictions, input rejection, threshold boundaries, persistent history, filtering, appearance changes and exports were exercised. Exact TreeSHAP contributions were checked against the model probability. PDF output was rendered and reviewed. Browser checks cover the actual rendered interface; this is not a formal WCAG conformance audit.
+All seven screens were tested with Streamlit AppTest. Real single and batch predictions, input rejection, threshold boundaries, persistent history, filtering, appearance changes and exports were exercised. Exact TreeSHAP contributions were checked against the model probability. PDF output was rendered and reviewed. Browser checks cover the actual rendered interface; this is not a formal WCAG conformance audit.
 
 Backups: the original app remains in `app/app.py.bak`, and the preceding light dashboard is in `app/app.light-dashboard.py.bak`.
 ## Machine monitoring update

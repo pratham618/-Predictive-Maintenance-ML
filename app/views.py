@@ -112,6 +112,22 @@ def _set_inputs(values):
         st.session_state[key] = int(value) if key in ["speed","wear"] else float(value) if key not in ["machine_type"] else value
 
 
+def _forget_saved_results():
+    """Drop in-session results that may refer to a deleted assessment."""
+    for key in ("current_result", "last_batch", "batch_results", "batch_fingerprint", "pending_inputs", "selected_history_run"):
+        st.session_state.pop(key, None)
+    st.session_state["history_table_version"] = st.session_state.get("history_table_version", 0) + 1
+
+
+def _human_size(value):
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
 def _run(frame, source):
     with st.status("Analyzing machine conditions…", expanded=True) as status:
         st.write("Checking input ranges and required fields")
@@ -124,6 +140,7 @@ def _run(frame, source):
     st.session_state["last_batch"] = records
     st.session_state["current_result"] = records[0]
     st.session_state["switch_to_live"] = True
+    st.session_state["history_table_version"] = st.session_state.get("history_table_version", 0) + 1
     st.toast("Prediction complete. Results saved to History.", icon=":material/check_circle:")
     return records
 
@@ -284,14 +301,18 @@ def batch_prediction():
             selected=ui.runs_table(results,"batch_table",True,320)
             exports(results,"batch_")
             if selected and selected.selection.rows:
-                record=results[selected.selection.rows[0]]
-                st.session_state["current_result"]=record
-                result_summary(record)
-                result_details(record)
+                index = selected.selection.rows[0]
+                if index < len(results):
+                    record=results[index]
+                    st.session_state["current_result"]=record
+                    result_summary(record)
+                    result_details(record)
 
 
 def history_page():
     ui.heading("Machines & history", "Inspect a machine, follow its risk trend, or find a saved assessment.", "OPERATIONS")
+    if notice := st.session_state.pop("history_notice", None):
+        st.success(notice)
     records=api.history()
     machine_monitor(records, work=maintenance.latest(api.work_history(), "work_id"))
     with st.container(border=True):
@@ -304,11 +325,22 @@ def history_page():
         if not filtered and records:
             ui.empty("No matching runs", "Try another search or clear the filters.","search")
         else:
-            selected=ui.runs_table(filtered,"history_table",True,360)
+            selected=ui.runs_table(filtered,f"history_table_{st.session_state.get('history_table_version', 0)}",True,360)
             st.caption("Click a column header to sort. Select a row for details and reuse. Exports follow the current filters.")
             exports(filtered,"history_")
+            st.caption("To back up or clear all saved assessments, open Settings → Data management.")
+            st.page_link("app_pages/settings.py", label="Backup or clear saved history", icon=":material/database:")
             if selected and selected.selection.rows:
-                record=filtered[selected.selection.rows[0]]
+                index = selected.selection.rows[0]
+                if index < len(filtered):
+                    st.session_state["selected_history_run"] = filtered[index]["id"]
+                else:
+                    st.info("The selected row is no longer available. Select another row.")
+            selected_id = st.session_state.get("selected_history_run")
+            record = next((row for row in records if row["id"] == selected_id), None)
+            if selected_id and record is None:
+                st.session_state.pop("selected_history_run", None)
+            if record:
                 ui.section(f"Run {record['id']}","Selected snapshot", "cpu")
                 if st.button("Reuse inputs in a new prediction",key="history_reuse"):
                     st.session_state["reference_input"] = record["source"] in ("Demo", "Sample", "Reference CSV")
@@ -317,6 +349,18 @@ def history_page():
                     st.switch_page("app_pages/predict.py")
                 result_summary(record)
                 result_details(record)
+                with st.expander("Delete this assessment"):
+                    st.warning("This permanently removes the prediction and its outcome labels. Linked maintenance work is kept, but the link is cleared.")
+                    confirmed = st.checkbox("I understand this cannot be undone", key=f"delete_confirm_{record['id']}")
+                    if st.button("Delete assessment", type="primary", disabled=not confirmed, key=f"delete_run_{record['id']}"):
+                        try:
+                            backup = api.backup_database()
+                            removed = api.delete_runs([record["id"]])
+                            _forget_saved_results()
+                            st.session_state["history_notice"] = f"Deleted {removed} assessment. Backup saved to {backup.name}."
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Could not delete the assessment: {exc}")
 
 
 def performance():
@@ -413,7 +457,8 @@ def datasets():
     ui.heading("Datasets", "Inspect the data behind your machine intelligence.", "DATA / LIBRARY")
     source=st.segmented_control("Dataset source",["Reference dataset","Upload dataset"],default="Reference dataset",label_visibility="collapsed")
     if source=="Upload dataset":
-        upload=st.file_uploader("Upload an operating dataset",type=["csv"],key="dataset_upload")
+        version=st.session_state.setdefault("dataset_upload_version",0)
+        upload=st.file_uploader("Upload an operating dataset",type=["csv"],key=f"dataset_upload_{version}")
         if upload:
             try:
                 frame=read_upload(upload)
@@ -422,9 +467,18 @@ def datasets():
             except Exception as exc:
                 st.error(str(exc))
                 return
+        elif "uploaded_dataset" in st.session_state:
+            frame=st.session_state["uploaded_dataset"]
+            st.caption(f"Using the last uploaded dataset · {len(frame):,} rows")
         else:
             ui.empty("Bring your operating data", "Upload a CSV using the six machine-input columns. Use the template from Run prediction → CSV batch.", "database")
             return
+        if "uploaded_dataset" in st.session_state:
+            if st.button("Clear uploaded dataset", key="clear_uploaded_dataset"):
+                for key in ("uploaded_dataset", "batch_dataset", "batch_results", "batch_fingerprint"):
+                    st.session_state.pop(key, None)
+                st.session_state["dataset_upload_version"] = version + 1
+                st.rerun()
     else:
         frame=api.dataset()
     cols=st.columns(4)
@@ -454,6 +508,8 @@ def datasets():
 
 def settings():
     ui.heading("Workspace settings", "A focused environment, tuned to you.", "WORKSPACE / PREFERENCES")
+    if notice := st.session_state.pop("data_notice", None):
+        st.success(notice)
     left,right=st.columns([1.3,1])
     with left,st.container(border=True):
         ui.section("Appearance","Dark by default. A lighter view when you need it.","settings")
@@ -477,6 +533,56 @@ def settings():
         st.divider()
         ui.section("Keyboard shortcuts","Navigate without leaving the keyboard","layers")
         ui.key_values([("Search workspace","Ctrl / Cmd + K"),("New prediction","Ctrl / Cmd + Shift + P"),("Close dialog","Esc"),("Move between controls","Tab / Shift + Tab")])
+    with st.container(border=True):
+        ui.section("Data management", "Backups, storage health, and destructive actions", "database")
+        try:
+            info = api.database_info()
+        except Exception as exc:
+            st.error(f"Could not read the local database: {exc}")
+            return
+        a,b,c,d = st.columns(4)
+        a.metric("Saved assessments", f"{info['runs']:,}", border=True)
+        b.metric("Outcome revisions", f"{info['outcomes']:,}", border=True)
+        c.metric("Work revisions", f"{info['work']:,}", border=True)
+        d.metric("Database size", _human_size(info["size_bytes"]), border=True)
+        try:
+            last = ui.time_label(info["last"]) if info["last"] else "None"
+        except Exception:
+            last = str(info["last"]) if info["last"] else "None"
+        st.caption(f"Database: {info['path']} · Integrity: {info['integrity']} · Machines in history: {info['machines']:,} · Last assessment: {last}")
+        try:
+            st.download_button("Download database backup", api.backup_bytes(),
+                               file_name=f"prediction-runs-{datetime.now(api.IST).strftime('%Y%m%d-%H%M%S')}.sqlite3",
+                               mime="application/vnd.sqlite3", width="stretch", key="download_db_backup")
+        except Exception as exc:
+            st.warning(f"Backup download is unavailable: {exc}")
+        st.caption("A timestamped backup is also written under data/backups before any destructive action.")
+        with st.expander("Clear prediction history", expanded=False):
+            st.warning("Removes every saved assessment and its outcome labels. Maintenance work items are kept, but links to deleted assessments are cleared. This cannot be undone.")
+            confirm = st.text_input('Type "CLEAR HISTORY" to confirm', key="clear_history_confirm")
+            if st.button("Clear prediction history", type="primary", disabled=confirm.strip() != "CLEAR HISTORY", key="clear_history_button"):
+                try:
+                    backup = api.backup_database()
+                    removed = api.clear_history()
+                    _forget_saved_results()
+                    st.session_state["data_notice"] = f"Cleared {removed:,} saved assessment(s). Backup: {backup.name}."
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Could not clear history: {exc}")
+        with st.expander("Reset workspace", expanded=False):
+            st.warning("Removes all saved assessments, outcome labels and maintenance work. Use this only when you want a completely empty workspace. This cannot be undone.")
+            confirm_reset = st.text_input('Type "RESET WORKSPACE" to confirm', key="reset_workspace_confirm")
+            if st.button("Reset all local records", type="primary", disabled=confirm_reset.strip() != "RESET WORKSPACE", key="reset_workspace_button"):
+                try:
+                    backup = api.backup_database()
+                    counts = api.reset_workspace()
+                    _forget_saved_results()
+                    st.session_state["data_notice"] = (f"Workspace reset: {counts['runs']:,} assessment(s), "
+                                                       f"{counts['outcomes']:,} outcome revision(s), {counts['work']:,} work revision(s) removed. "
+                                                       f"Backup: {backup.name}.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Could not reset the workspace: {exc}")
 
 
 def machine_monitor(records, work=None):

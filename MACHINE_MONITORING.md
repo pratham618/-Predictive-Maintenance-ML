@@ -1,6 +1,6 @@
 # Machine monitoring
 
-Run the dashboard as before: install requirements-dashboard.txt and run
+Run the dashboard as before: install requirements.txt and run
 `streamlit run app/app.py`. Open **History** for machine monitoring.
 
 ## Asset identity and history

@@ -7,9 +7,10 @@ A Streamlit dashboard that uses XGBoost to estimate machine failure risk from te
 ## Demo walkthrough
 
 1. Open **Run prediction** and load a sample to see its risk score and feature contributions.
-2. Open **History** to review saved assessments and risk trends by machine ID.
+2. Open **History** to review saved assessments and risk trends by machine ID. Select a saved assessment to reuse its inputs or delete it.
 3. Open **Maintenance & outcomes** to log an inspection and record what the operator found.
 4. Open **Model performance** to review caught failures, missed failures, and false alarms.
+5. Open **Settings → Data management** to download a database backup, clear saved assessments, or reset the workspace.
 
 ## Validation results
 

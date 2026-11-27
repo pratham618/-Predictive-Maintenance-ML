@@ -82,7 +82,8 @@ def risk_level(probability, threshold):
 def predict(frame, source="Manual"):
     """API adapter. Returns serializable records ready for the UI or a REST response."""
     data = prepare(frame)
-    identities = [monitoring.machine_id(v) for v in frame["Machine ID"].tolist()] if "Machine ID" in frame else [None] * len(data)
+    raw_ids = frame["Machine ID"].tolist() if "Machine ID" in frame else [None] * len(data)
+    identities = [monitoring.machine_id(None if pd.isna(value) else value) for value in raw_ids]
     model, threshold, version = assets()
     started = perf_counter()
     probabilities = model.predict_proba(data)[:, 1]
@@ -115,7 +116,8 @@ def _connection():
 
 
 def save_runs(records):
-    records = [{**r, "machine_id": monitoring.machine_id(r.get("machine_id"))} for r in records]
+    records = [{**r, "machine_id": monitoring.machine_id(
+        None if pd.isna(r.get("machine_id")) else r.get("machine_id"))} for r in records]
     if any(r.get("source") == "Demo" or r["id"].startswith("DEMO-") for r in records):
         raise ValueError("Demo snapshots cannot be saved to prediction history.")
     with _connection() as connection:
@@ -127,6 +129,94 @@ def history(machine_id=None):
     with _connection() as connection:
         rows = connection.execute("SELECT payload, machine_id FROM runs WHERE (? IS NULL OR machine_id = ?) ORDER BY timestamp DESC, rowid DESC", (machine_id, machine_id)).fetchall()
     return [{**json.loads(row[0]), "machine_id": row[1]} for row in rows]
+
+
+def database_info():
+    """Read-only workspace health and size summary for the settings screen."""
+    with _connection() as connection:
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+        runs = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        outcomes = connection.execute("SELECT COUNT(*) FROM outcome_revisions").fetchone()[0]
+        work = connection.execute("SELECT COUNT(*) FROM maintenance_revisions").fetchone()[0]
+        machines = connection.execute("SELECT COUNT(DISTINCT machine_id) FROM runs WHERE machine_id IS NOT NULL").fetchone()[0]
+        last = connection.execute("SELECT MAX(timestamp) FROM runs").fetchone()[0]
+    return {"path": str(DB_PATH), "size_bytes": DB_PATH.stat().st_size if DB_PATH.exists() else 0,
+            "runs": runs, "outcomes": outcomes, "work": work, "machines": machines,
+            "last": last, "integrity": integrity}
+
+
+def backup_bytes():
+    """Current database file as bytes for a download button."""
+    with _connection():
+        pass
+    return DB_PATH.read_bytes()
+
+
+def backup_database():
+    """Create a consistent SQLite backup before a destructive operation."""
+    with _connection():
+        pass
+    folder = DB_PATH.parent / "backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"prediction_runs-{datetime.now(IST).strftime('%Y%m%d-%H%M%S-%f')}.sqlite3"
+    source = sqlite3.connect(DB_PATH)
+    destination = sqlite3.connect(target)
+    try:
+        with destination:
+            source.backup(destination)
+    finally:
+        source.close()
+        destination.close()
+    return target
+
+
+def _compact():
+    """Reclaim free pages after a large delete; never fail the operation."""
+    try:
+        connection = sqlite3.connect(DB_PATH, timeout=15)
+        try:
+            connection.execute("VACUUM")
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        pass
+
+
+def delete_runs(run_ids):
+    """Delete selected assessments, their outcome labels, and links from work items."""
+    ids = [str(value) for value in dict.fromkeys(run_ids) if value]
+    if not ids:
+        return 0
+    removed = 0
+    with _connection() as connection:
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            connection.execute(f"DELETE FROM outcome_revisions WHERE run_id IN ({marks})", chunk)
+            connection.execute(f"UPDATE maintenance_revisions SET run_id = NULL WHERE run_id IN ({marks})", chunk)
+            removed += connection.execute(f"DELETE FROM runs WHERE id IN ({marks})", chunk).rowcount
+    return removed
+
+
+def clear_history():
+    """Remove every saved assessment and outcome label; keep maintenance work items."""
+    with _connection() as connection:
+        connection.execute("DELETE FROM outcome_revisions")
+        connection.execute("UPDATE maintenance_revisions SET run_id = NULL WHERE run_id IS NOT NULL")
+        removed = connection.execute("DELETE FROM runs").rowcount
+    _compact()
+    return removed
+
+
+def reset_workspace():
+    """Remove assessments, outcome labels and maintenance work in one transaction."""
+    with _connection() as connection:
+        outcomes = connection.execute("DELETE FROM outcome_revisions").rowcount
+        connection.execute("UPDATE maintenance_revisions SET run_id = NULL")
+        runs = connection.execute("DELETE FROM runs").rowcount
+        work = connection.execute("DELETE FROM maintenance_revisions").rowcount
+    _compact()
+    return {"runs": runs, "outcomes": outcomes, "work": work}
 
 
 def confirm_outcome(run_id, outcome, notes, operator):
