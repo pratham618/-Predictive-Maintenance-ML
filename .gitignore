@@ -29,3 +29,4 @@ Thumbs.db
 *.bak
 # Local application database
 data/prediction_runs.sqlite3
+data/backups/

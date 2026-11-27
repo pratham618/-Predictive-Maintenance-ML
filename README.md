@@ -7,9 +7,14 @@ A Streamlit dashboard that uses XGBoost to estimate machine failure risk from te
 ## Demo walkthrough
 
 1. Open **Run prediction** and load a sample to see its risk score and feature contributions.
-2. Open **History** to review saved assessments and risk trends by machine ID.
+2. Open **History** to review saved assessments and risk trends by machine ID. Select a saved assessment to reuse its inputs or delete it.
 3. Open **Maintenance & outcomes** to log an inspection and record what the operator found.
 4. Open **Model performance** to review caught failures, missed failures, and false alarms.
+5. Open **Settings → Data management** to download a database backup, clear saved assessments, or reset the workspace.
+
+## Demo test cases
+
+`data/demo/demo_test_cases.csv` contains 17 labelled reference snapshots covering the four main failure modes, medium-risk watch cases, false alarms, missed failures, and an RNF indicator. Upload it in **Run prediction → CSV batch** and keep the reference-data checkbox checked. `data/demo/DEMO_TEST_CASES.txt` lists the expected probability, risk band, actual label, and the point each case demonstrates.
 
 ## Validation results
 

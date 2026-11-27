@@ -1,11 +1,14 @@
 """Machine identity, additive SQLite migration and saved-assessment monitoring."""
 from datetime import datetime, timedelta, timezone
+import math
 import re
 
 
 def machine_id(value):
     """Case-sensitive operator asset ID; never infer identity from dataset rows."""
     if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
         return None
     if not isinstance(value, str):
         raise ValueError("Machine ID must be text.")
