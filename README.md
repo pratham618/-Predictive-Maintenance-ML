@@ -12,6 +12,10 @@ A Streamlit dashboard that uses XGBoost to estimate machine failure risk from te
 4. Open **Model performance** to review caught failures, missed failures, and false alarms.
 5. Open **Settings → Data management** to download a database backup, clear saved assessments, or reset the workspace.
 
+## Demo test cases
+
+`data/demo/demo_test_cases.csv` contains 17 labelled reference snapshots covering the four main failure modes, medium-risk watch cases, false alarms, missed failures, and an RNF indicator. Upload it in **Run prediction → CSV batch** and keep the reference-data checkbox checked. `data/demo/DEMO_TEST_CASES.txt` lists the expected probability, risk band, actual label, and the point each case demonstrates.
+
 ## Validation results
 
 At the saved 0.70 threshold, the model caught 58 of 68 failures and raised 15 false alarms across 2,000 validation rows. Failure recall was 85.29% and precision was 79.45%. The synthetic validation split was also used to select the threshold. Independent evaluation with real machine data is pending.

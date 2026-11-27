@@ -1,0 +1,91 @@
+PREDICTIVE MAINTENANCE DASHBOARD - DEMO TEST CASES
+==============================================================================
+
+Model artifact      : 71406426
+Decision threshold  : 0.70
+Risk bands          : Low < 35%  |  Medium 35% to <70%  |  High >= 70%
+Dataset             : AI4I 2020 predictive-maintenance reference data
+
+HOW TO USE
+------------------------------------------------------------------------------
+1. Start the dashboard and open Run prediction -> CSV batch.
+2. Upload data/demo/demo_test_cases.csv.
+3. Keep "This CSV contains reference or simulated data" checked.
+4. Click Analyze batch and select each DEMO-* row to inspect the result.
+5. Compare the model probability and risk band with the actual label below.
+
+The CSV contains only the six model inputs and a Machine ID. Actual labels
+and expected risk bands are kept in this text file so the upload remains
+compatible with the application.
+
+CASES
+------------------------------------------------------------------------------
+Case               UDI T     Air   Proc   RPM Torque Wear Actual              Mode    P(fail) Risk   
+-----------------------------------------------------------------------------------------------------
+DEMO-NORMAL-01       1 M   298.1  308.6  1551   42.8    0 No failure          None     0.0002 Low    
+DEMO-NORMAL-02       2 L   298.2  308.7  1408   46.3    3 No failure          None     0.0026 Low    
+DEMO-TWF-01       4386 L   301.8  309.7  1442   45.3  233 Failure             TWF      0.9810 High   
+DEMO-TWF-02       1683 H   297.9  307.4  1604   36.1  225 Failure             TWF      0.9614 High   
+DEMO-HDF-01       4559 L   302.7  310.7  1369   47.5   11 Failure             HDF      0.9979 High   
+DEMO-HDF-02       4662 L   303.3  311.3  1350   48.1   32 Failure             HDF      0.9977 High   
+DEMO-PWF-01       1017 M   296.3  307.2  1319   68.3   24 Failure             PWF      0.9983 High   
+DEMO-PWF-02       2599 L   299.1  308.8  1320   67.5   20 Failure             PWF      0.9976 High   
+DEMO-OSF-01       7594 L   300.5  311.2  1270   67.5  208 Failure             OSF      0.9988 High   
+DEMO-OSF-02       6498 L   300.8  309.9  1312   65.3  192 Failure             OSF      0.9983 High   
+DEMO-WATCH-01      332 M   297.6  308.4  1391   51.9  218 No failure          None     0.4185 Medium 
+DEMO-WATCH-02      417 L   297.4  308.5  1495   37.8  211 No failure          None     0.5955 Medium 
+DEMO-FALSE-01       76 L   298.8  308.9  1379   46.7  204 No failure          None     0.7665 High   
+DEMO-FALSE-02     1170 L   297.0  308.1  1355   43.7  217 No failure          None     0.8472 High   
+DEMO-MISS-01      1997 M   298.4  308.0  1416   38.2  198 Failure             TWF      0.0027 Low    
+DEMO-MISS-02      4035 L   302.0  310.8  1615   29.0  235 Failure             TWF      0.4666 Medium 
+DEMO-RNF-01       5490 L   302.6  312.1  1499   35.0  215 No failure (RNF=1)  RNF      0.6058 Medium 
+
+WHAT EACH GROUP DEMONSTRATES
+------------------------------------------------------------------------------
+Normal cases
+  DEMO-NORMAL-01/02: clean low-risk readings. Both score below 1% and
+  should appear in the Low band. They provide a baseline for comparison.
+
+Tool-wear failure (TWF)
+  DEMO-TWF-01/02: tool wear above 200 minutes. TWF is driven by accumulated
+  tool use; the model scores both cases above 95% and classifies them High.
+
+Heat-dissipation failure (HDF)
+  DEMO-HDF-01/02: low process-to-air temperature difference and high torque.
+  HDF occurs when heat cannot be dissipated; both cases score above 99%.
+
+Power failure (PWF)
+  DEMO-PWF-01/02: high torque at moderate speed, i.e. a high mechanical
+  power demand. Both cases score above 99% and are High risk.
+
+Overstrain failure (OSF)
+  DEMO-OSF-01/02: high torque combined with high tool wear. Both cases
+  score above 99% and are High risk.
+
+Watch-band cases
+  DEMO-WATCH-01/02: actual no-failure readings that fall in the Medium band
+  (35% to <70%). They demonstrate why the dashboard recommends condition
+  checks rather than automatically replacing a part.
+
+False alarms
+  DEMO-FALSE-01/02: actual no-failure readings that score above 70%. They
+  demonstrate the false-positive cost of the selected threshold and are
+  useful for discussing precision versus recall.
+
+Missed failures
+  DEMO-MISS-01/02: actual TWF failures that score below 70%. They show the
+  residual false-negative risk; the model is not a guarantee of detection.
+
+Random-failure indicator
+  DEMO-RNF-01: the dataset marks RNF=1 but Machine failure=0. Random
+  failures are not explained by the six inputs, so this case is an honest
+  reminder that not every failure mode is learnable from this feature set.
+
+NOTES
+------------------------------------------------------------------------------
+- Probabilities are scores from the saved model, not calibrated chances.
+- The app predicts failure/no-failure, not the failure mode; modes above
+  are the dataset labels for interpretation.
+- Reference/simulated rows are excluded from machine alerts by design.
+- Results are deterministic for model artifact 71406426.
+- Model performance is validation evidence; see Model performance in the app.
